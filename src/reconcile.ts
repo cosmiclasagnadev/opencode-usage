@@ -98,7 +98,7 @@ export async function seed(api: TuiPluginApi) {
         const group = list.slice(i, i + BATCH)
         const rowsBySession = await Promise.all(
           group.map(async (session) => ({
-            rows: await fetchSessionRows(api, session.id),
+            rows: await fetchSessionRows(api, session.id).catch(() => []),
           })),
         )
         rowsBySession.forEach(({ rows }) => {
