@@ -8,11 +8,16 @@ Repository: `https://github.com/cosmiclasagnadev/opencode-usage`
 
 ## Install
 
-```bash
-opencode plugin opencode-usage-dashboard
+Add it to `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-usage-dashboard"]
+}
 ```
 
-Or add it to `tui.json`:
+If you keep plugin config in `tui.json`, that works too:
 
 ```json
 {

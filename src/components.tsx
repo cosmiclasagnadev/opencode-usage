@@ -22,7 +22,7 @@ export function Tabs<Value extends string>(props: {
   api: TuiPluginApi
   label: string
   value: Value
-  list: Value[]
+  list: readonly Value[]
   pick: (value: Value) => void
 }) {
   const theme = () => props.api.theme.current

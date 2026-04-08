@@ -1,9 +1,22 @@
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import { createSignal } from "solid-js"
 import { EMPTY_FLAT } from "./types"
-import type { Agg, FlatCounters } from "./types"
+import type { Agg, FlatCounters, Row } from "./types"
 
-function emptyAgg(): Agg {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+}
+
+function isAgg(value: unknown): value is Agg {
+  if (!isRecord(value)) return false
+  if (value.v !== 4 || typeof value.ready !== "boolean") return false
+  if (!isRecord(value.meta) || !isRecord(value.by_s) || !Array.isArray(value.days)) return false
+  if (!isRecord(value.gf) || !isRecord(value.fresh)) return false
+  if (!isRecord(value.gf.totals)) return false
+  return true
+}
+
+export function createAgg(): Agg {
   return {
     v: 4,
     ready: false,
@@ -12,19 +25,19 @@ function emptyAgg(): Agg {
     days: [],
     gf: { ...EMPTY_FLAT },
     fresh: {},
-    seen: { msg: {}, tool: {} },
   }
 }
 
 export const store = {
-  agg: emptyAgg(),
+  agg: createAgg(),
   wait: undefined as Promise<void> | undefined,
   save: undefined as ReturnType<typeof setTimeout> | undefined,
   dirty: false,
   rev: 0,
-  seed: false,
   bump: undefined as ReturnType<typeof setTimeout> | undefined,
   flat: new Map<string, FlatCounters>(),
+  active: new Map<string, number>(),
+  rows: new Map<string, Row[]>(),
   state: "",
   sync: new Set<string>(),
   timers: new Map<string, ReturnType<typeof setTimeout>>(),
@@ -42,13 +55,16 @@ export function bump() {
 }
 
 export function resetState() {
-  store.agg = emptyAgg()
+  store.agg = createAgg()
   store.wait = undefined
   store.dirty = false
-  store.seed = false
   if (store.save) clearTimeout(store.save)
   if (store.bump) clearTimeout(store.bump)
+  store.save = undefined
+  store.bump = undefined
   store.flat.clear()
+  store.active.clear()
+  store.rows.clear()
   store.sync.clear()
   for (const timer of store.timers.values()) clearTimeout(timer)
   store.timers.clear()
@@ -67,8 +83,7 @@ export function save(api: TuiPluginApi) {
 }
 
 export function load(api: TuiPluginApi) {
-  const hit = api.kv.get<Agg | undefined>(keyFor(api))
-  if (!hit || hit.v !== 4) return
-  if (!Array.isArray(hit.days)) hit.days = []
+  const hit = api.kv.get<unknown>(keyFor(api))
+  if (!isAgg(hit)) return
   store.agg = hit
 }
