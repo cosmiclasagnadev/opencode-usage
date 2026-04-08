@@ -49,7 +49,26 @@ export function View(props: {
     return { name: back.name, params: back.params as Record<string, unknown> }
   }
 
+  let persisted = false
+  const persistPrefs = () => {
+    if (persisted) return
+    persisted = true
+    const currentSection = section()
+    const currentScope = scope()
+    const currentWin = win()
+    setTimeout(() => {
+      props.api.kv.set(sectionKey, currentSection)
+      props.api.kv.set(scopeKey, currentScope)
+      props.api.kv.set(winKey, currentWin)
+    }, 0)
+  }
+
+  onCleanup(() => {
+    persistPrefs()
+  })
+
   const leave = () => {
+    persistPrefs()
     const prev = back()
     if (!prev || prev.name === "usage") return props.api.route.navigate("home")
     props.api.route.navigate(prev.name, prev.params)
@@ -68,43 +87,53 @@ export function View(props: {
     const sid = sessionID()
     dir
     sid
+    let active = true
+    onCleanup(() => {
+      active = false
+    })
     ;(async () => {
       setLoading(true)
       await seed(props.api)
+      if (!active) return
       const stale = await refreshProjectSessions(props.api)
+      if (!active) return
       const current = sid ? stale.find((item) => item.id === sid) : undefined
       if (current) await reconcileSession(props.api, current.id)
+      if (!active) return
       setLoading(false)
       const rest = stale.filter((item) => item.id !== sid)
       if (!rest.length) return
       setRefreshing(rest.length)
       for (const session of rest) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        if (!active) return
         await reconcileSession(props.api, session.id)
+        if (!active) return
         setRefreshing((count) => Math.max(0, count - 1))
       }
     })().finally(() => {
+      if (!active) return
       setLoading(false)
       setRefreshing(0)
     })
   })
 
   createEffect(() => {
-    const s = section()
-    const sc = scope()
-    const w = win()
-    const o = sort()
     const dir = props.api.state.path.directory
+    const currentSection = section()
+    const currentScope = scope()
+    const currentWin = win()
+    const currentSort = sort()
     dbRev()
     dir
-    setView(computeView(s, sc, w, sessionID(), scopeParam(), o))
+    setView(computeView(currentSection, currentScope, currentWin, sessionID(), scopeParam(), currentSort))
   })
 
-  const pickScope = (v: (typeof scopes)[number]) => setScope(v)
-  const pickSection = (v: (typeof sections)[number]) => setSection(v)
-  const pickWin = (v: Win) => setWin(v)
+  const pickScope = (value: (typeof scopes)[number]) => setScope(value)
+  const pickSection = (value: (typeof sections)[number]) => setSection(value)
+  const pickWin = (value: Win) => setWin(value)
   const theme = () => props.api.theme.current
-  const v = () => view()
-  const h = () => v().head
+  const h = () => view().head
 
   useKeyboard((evt) => {
     if (props.keys.match("quit", evt)) {
@@ -150,7 +179,7 @@ export function View(props: {
     if (props.keys.match("win_all", evt)) {
       evt.preventDefault()
       evt.stopPropagation()
-      batch(() => pickWin("all"))
+      return batch(() => pickWin("all"))
     }
   })
 
@@ -166,7 +195,7 @@ export function View(props: {
       <Show when={!loading() && refreshing() > 0}>
         <text fg={theme().textMuted}>{`Refreshing usage... ${spinner()}`}</text>
       </Show>
-      <Tabs label="section" value={section()} list={[...sections]} pick={pickSection} api={props.api} />
+      <Tabs label="section" value={section()} list={sections} pick={pickSection} api={props.api} />
       <Show when={section() === "speed"}>
         <text fg={theme().textMuted}>
           End-to-end output rate from completed messages; not decode-only model TPS. Calculated as output tokens divided
@@ -179,11 +208,11 @@ export function View(props: {
         fallback={<text fg={theme().warning}>Open /usage from a session to use session scope.</text>}
       >
         <Show
-          when={v().ready}
-          fallback={<text fg={theme().info}>{v().sync ? "Loading history..." : "Waiting for cache..."}</text>}
+          when={view().ready}
+          fallback={<text fg={theme().info}>{view().sync ? "Loading history..." : "Waiting for cache..."}</text>}
         >
-          <Show when={v().rows.length > 0} fallback={<text fg={theme().textMuted}>No usage yet for this filter.</text>}>
-            <For each={v().rows}>{(row) => <Meter api={props.api} row={row} />}</For>
+          <Show when={view().rows.length > 0} fallback={<text fg={theme().textMuted}>No usage yet for this filter.</text>}>
+            <For each={view().rows}>{(row) => <Meter api={props.api} row={row} />}</For>
           </Show>
         </Show>
       </Show>

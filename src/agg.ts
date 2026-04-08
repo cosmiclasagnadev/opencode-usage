@@ -1,5 +1,6 @@
 import type { AssistantMessage, Message, Part, Session, ToolPart } from "@opencode-ai/sdk/v2"
 import { store } from "./state"
+import type { Agg } from "./types"
 import type { SessDay, Win } from "./types"
 
 export function dayKey(ts: number) {
@@ -31,29 +32,6 @@ export function noteOfError(err: unknown) {
   return "error"
 }
 
-export function msgSig(msg: AssistantMessage) {
-  return [
-    msg.id,
-    msg.time.created,
-    msg.time.completed ?? 0,
-    msg.providerID,
-    msg.modelID,
-    msg.agent,
-    msg.cost,
-    msg.tokens.input,
-    msg.tokens.output,
-    msg.tokens.reasoning,
-    noteOfError(msg.error),
-  ].join(":")
-}
-
-export function toolSig(part: ToolPart) {
-  const s = part.state
-  const end = "time" in s && s.time && "end" in s.time ? (s.time.end ?? 0) : 0
-  const start = "time" in s && s.time ? s.time.start : 0
-  return [part.id, part.tool, s.status, start, end].join(":")
-}
-
 export function isAssistant(msg: Message): msg is AssistantMessage {
   return msg.role === "assistant"
 }
@@ -62,15 +40,15 @@ export function isTool(part: Part): part is ToolPart {
   return part.type === "tool"
 }
 
-export function sessDay(sid: string, dk: string): SessDay {
-  let sd = store.agg.by_s[sid]
+export function sessDay(agg: Agg, sid: string, dk: string): SessDay {
+  let sd = agg.by_s[sid]
   if (!sd) {
     sd = {}
-    store.agg.by_s[sid] = sd
+    agg.by_s[sid] = sd
   }
   let d = sd[dk]
   if (!d) {
-    if (!store.agg.days.includes(dk)) store.agg.days.push(dk)
+    if (!agg.days.includes(dk)) agg.days.push(dk)
     d = {
       models: {},
       tools: {},
@@ -84,21 +62,18 @@ export function sessDay(sid: string, dk: string): SessDay {
   return d
 }
 
-export function putSess(s: Session) {
-  store.agg.meta[s.id] = { id: s.id, pid: s.projectID, dir: s.directory }
-  const fresh = store.agg.fresh[s.id] ?? { updated: 0, synced: 0 }
+export function putSess(agg: Agg, s: Session) {
+  agg.meta[s.id] = { id: s.id, pid: s.projectID, dir: s.directory }
+  const fresh = agg.fresh[s.id] ?? { updated: 0, synced: 0 }
   fresh.updated = Math.max(fresh.updated, s.time.updated)
-  store.agg.fresh[s.id] = fresh
+  agg.fresh[s.id] = fresh
 }
 
-export function putMsg(msg: Message) {
+export function putMsg(agg: Agg, msg: Message) {
   if (!isAssistant(msg)) return false
   if (!msg.time.completed) return false
-  const sig = msgSig(msg)
-  if (store.agg.seen.msg[msg.id] === sig) return false
-  store.agg.seen.msg[msg.id] = sig
   const dk = dayKey(msg.time.completed ?? msg.time.created)
-  const b = sessDay(msg.sessionID, dk)
+  const b = sessDay(agg, msg.sessionID, dk)
   const mid = `${msg.providerID}/${msg.modelID}`
   const aid = msg.agent
   if (!b.models[mid]) b.models[mid] = { n: 0, cost: 0, input: 0, output: 0 }
@@ -124,43 +99,16 @@ export function putMsg(msg: Message) {
   b.totals.cost += msg.cost
   b.totals.input += msg.tokens.input + msg.tokens.cache.read
   b.totals.cache += msg.tokens.cache.read
-  if (!store.seed) {
-    const gf = store.agg.gf
-    if (!gf.models[mid]) gf.models[mid] = { n: 0, cost: 0, input: 0, output: 0 }
-    gf.models[mid]!.n += 1
-    gf.models[mid]!.cost += msg.cost
-    gf.models[mid]!.input += msg.tokens.input
-    gf.models[mid]!.output += msg.tokens.output
-    if (!gf.agents[aid]) gf.agents[aid] = { n: 0, cost: 0, output: 0 }
-    gf.agents[aid]!.n += 1
-    gf.agents[aid]!.cost += msg.cost
-    gf.agents[aid]!.output += msg.tokens.output
-    if (msg.time.completed > msg.time.created) {
-      if (!gf.speed[mid]) gf.speed[mid] = { out: 0, ms: 0, n: 0 }
-      gf.speed[mid]!.out += msg.tokens.output
-      gf.speed[mid]!.ms += msg.time.completed - msg.time.created
-      gf.speed[mid]!.n += 1
-    }
-    if (msg.error)
-      gf.errors[`assistant:${noteOfError(msg.error)}`] = (gf.errors[`assistant:${noteOfError(msg.error)}`] ?? 0) + 1
-    gf.totals.msg += 1
-    gf.totals.cost += msg.cost
-    gf.totals.input += msg.tokens.input + msg.tokens.cache.read
-    gf.totals.cache += msg.tokens.cache.read
-  }
-  store.rev += 1
   return true
 }
 
-export function putTool(part: Part) {
+export function putTool(agg: Agg, part: Part) {
   if (!isTool(part)) return false
-  const sig = toolSig(part)
-  if (store.agg.seen.tool[part.id] === sig) return false
-  store.agg.seen.tool[part.id] = sig
   const s = part.state
-  const ts = "time" in s && s.time && "end" in s.time ? (s.time.end ?? 0) : 0
-  const dk = dayKey(ts || Date.now())
-  const b = sessDay(part.sessionID, dk)
+  if (s.status !== "completed" && s.status !== "error") return false
+  if (!("time" in s) || !s.time || !("end" in s.time)) return false
+  const dk = dayKey(s.time.end)
+  const b = sessDay(agg, part.sessionID, dk)
   if (!b.tools[part.tool]) b.tools[part.tool] = { n: 0, err: 0, ms: 0 }
   const t = b.tools[part.tool]!
   if (s.status === "completed") {
@@ -172,21 +120,6 @@ export function putTool(part: Part) {
     t.ms += s.time.end - s.time.start
   }
   b.totals.tool += 1
-  if (!store.seed) {
-    const gf = store.agg.gf
-    if (!gf.tools[part.tool]) gf.tools[part.tool] = { n: 0, err: 0, ms: 0 }
-    const gt = gf.tools[part.tool]!
-    if (s.status === "completed") {
-      gt.n += 1
-      gt.ms += s.time.end - s.time.start
-    } else if (s.status === "error") {
-      gt.n += 1
-      gt.err += 1
-      gt.ms += s.time.end - s.time.start
-    }
-    gf.totals.tool += 1
-  }
-  store.rev += 1
   return true
 }
 

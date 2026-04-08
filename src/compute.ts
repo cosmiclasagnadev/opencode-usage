@@ -4,6 +4,22 @@ import { store } from "./state"
 import { EMPTY_VIEW } from "./types"
 import type { FlatCounters, Row, Scope, ScopeParam, Section, SortState, ViewData, Win } from "./types"
 
+function viewKey(scope: Scope, sid: string | undefined, sp: ScopeParam, win: Win) {
+  return `${store.rev}:${scope}:${sid ?? ""}:${sp.pid ?? ""}:${sp.dir ?? ""}:${win}`
+}
+
+function sectionSortKey(section: Section, sort: SortState) {
+  if (section === "models") return sort.models
+  if (section === "agents") return sort.agents
+  if (section === "tools") return sort.tools
+  if (section === "speed") return sort.speed
+  return sort.errors
+}
+
+function rowsKey(section: Section, scope: Scope, sid: string | undefined, sp: ScopeParam, win: Win, sort: SortState) {
+  return `${viewKey(scope, sid, sp, win)}:${section}:${sectionSortKey(section, sort)}`
+}
+
 export function filterIds(scope: Scope, sid: string | undefined, sp: ScopeParam) {
   const meta = store.agg.meta
   if (scope === "global") return new Set(Object.keys(meta))
@@ -70,15 +86,9 @@ export function buildFlat(allowed: Set<string>, win: Win): FlatCounters {
 }
 
 export function collectFlat(scope: Scope, sid: string | undefined, sp: ScopeParam, win: Win): FlatCounters {
-  const key = `${store.rev}:${scope}:${sid ?? ""}:${sp.pid ?? ""}:${sp.dir ?? ""}:${win}`
+  const key = viewKey(scope, sid, sp, win)
   const hit = store.flat.get(key)
   if (hit) return hit
-  if (win === "all" && scope === "global") {
-    store.flat.set(key, store.agg.gf)
-    const old = store.flat.keys().next().value
-    if (store.flat.size > 12 && old) store.flat.delete(old)
-    return store.agg.gf
-  }
   const flat = buildFlat(filterIds(scope, sid, sp), win)
   store.flat.set(key, flat)
   const old = store.flat.keys().next().value
@@ -103,6 +113,36 @@ export function activeSessions(allowed: Set<string>, win: Win) {
     if (hit) count += 1
   }
   return count
+}
+
+export function collectActiveSessions(scope: Scope, sid: string | undefined, sp: ScopeParam, win: Win) {
+  const key = viewKey(scope, sid, sp, win)
+  const hit = store.active.get(key)
+  if (hit != null) return hit
+  const count = activeSessions(filterIds(scope, sid, sp), win)
+  store.active.set(key, count)
+  const old = store.active.keys().next().value
+  if (store.active.size > 12 && old) store.active.delete(old)
+  return count
+}
+
+export function collectRows(
+  section: Section,
+  scope: Scope,
+  sid: string | undefined,
+  sp: ScopeParam,
+  win: Win,
+  flat: FlatCounters,
+  sort: SortState,
+) {
+  const key = rowsKey(section, scope, sid, sp, win, sort)
+  const hit = store.rows.get(key)
+  if (hit) return hit
+  const rows = rowsFor(section, flat, sort)
+  store.rows.set(key, rows)
+  const old = store.rows.keys().next().value
+  if (store.rows.size > 36 && old) store.rows.delete(old)
+  return rows
 }
 
 export function rowsFor(section: Section, flat: FlatCounters, sort: SortState): Row[] {
@@ -203,9 +243,9 @@ export function computeView(
   const flat = collectFlat(scope, sid, sp, win)
   const input = flat.totals.input
   return {
-    rows: rowsFor(section, flat, sort),
+    rows: collectRows(section, scope, sid, sp, win, flat, sort),
     head: {
-      sessions: activeSessions(allowed, win),
+      sessions: collectActiveSessions(scope, sid, sp, win),
       msg: flat.totals.msg,
       tool: flat.totals.tool,
       cost: flat.totals.cost,

@@ -57,7 +57,6 @@ export type Agg = {
   days: string[]
   gf: FlatCounters
   fresh: Record<string, Fresh>
-  seen: { msg: Record<string, string>; tool: Record<string, string> }
 }
 
 export type ScopeParam = { pid?: string; dir?: string }

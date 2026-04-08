@@ -1,7 +1,6 @@
 import type { TuiPlugin } from "@opencode-ai/plugin/tui"
-import { putMsg, putTool } from "./agg"
-import { scheduleReconcile, refreshSession, seed } from "./reconcile"
-import { bump, save, store } from "./state"
+import { scheduleReconcile, seed } from "./reconcile"
+import { resetState } from "./state"
 import { View } from "./view"
 
 export const tui: TuiPlugin = async (api) => {
@@ -17,7 +16,7 @@ export const tui: TuiPlugin = async (api) => {
     win_all: "3",
   })
 
-  api.command.register(() => [
+  const disposeCommand = api.command.register(() => [
     {
       title: "OpenCode Usage",
       description: "Open model, agent, tool and error usage",
@@ -35,7 +34,7 @@ export const tui: TuiPlugin = async (api) => {
     },
   ])
 
-  api.route.register([
+  const disposeRoute = api.route.register([
     {
       name: "usage",
       render(input) {
@@ -44,26 +43,22 @@ export const tui: TuiPlugin = async (api) => {
     },
   ])
 
-  api.event.on("message.updated", (evt) => {
-    const changed = putMsg(evt.properties.info)
-    void refreshSession(api, evt.properties.sessionID).then((session) => {
-      if (!session) return
-      if ((store.agg.fresh[session.id]?.synced ?? 0) < session.time.updated) scheduleReconcile(api, session.id)
-    })
-    if (!changed) return
-    save(api)
-    bump()
+  const scheduleSession = (sessionID: string) => scheduleReconcile(api, sessionID)
+
+  const disposeMessage = api.event.on("message.updated", (evt) => {
+    scheduleSession(evt.properties.sessionID)
   })
 
-  api.event.on("message.part.updated", (evt) => {
-    const changed = putTool(evt.properties.part)
-    void refreshSession(api, evt.properties.sessionID).then((session) => {
-      if (!session) return
-      if ((store.agg.fresh[session.id]?.synced ?? 0) < session.time.updated) scheduleReconcile(api, session.id)
-    })
-    if (!changed) return
-    save(api)
-    bump()
+  const disposePart = api.event.on("message.part.updated", (evt) => {
+    scheduleSession(evt.properties.sessionID)
+  })
+
+  api.lifecycle.onDispose(() => {
+    disposePart()
+    disposeMessage()
+    disposeRoute()
+    disposeCommand()
+    resetState()
   })
 
   void seed(api)
