@@ -40,7 +40,7 @@ If you keep plugin config in `tui.json`, that works too:
 
 The throughput section shows end-to-end output rate, not decode-only model TPS.
 
-It is calculated as output tokens divided by total assistant message duration.
+It is calculated as output tokens divided by the time between the first visible assistant text and message completion.
 
 ## Current Limits
 
