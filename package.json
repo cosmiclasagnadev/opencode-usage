@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "opencode-usage-dashboard",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "TUI usage dashboard plugin for OpenCode",
   "type": "module",
   "license": "MIT",
